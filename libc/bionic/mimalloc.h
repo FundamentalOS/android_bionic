@@ -16,6 +16,9 @@
 
 #pragma once
 
+// bionic is built with stl:none and -nostdlibinc; skip mimalloc's C++
+// std::allocator adapter (it pulls <cstddef>/<type_traits>/<utility>).
+#define MI_SKIP_CPP_ALLOCATOR
 #include <mimalloc.h>
 #include <malloc.h>  // For struct mallinfo.
 
@@ -36,7 +39,6 @@ __BEGIN_DECLS
 // These entry points are NOT provided by libmimalloc; they are implemented in
 // mimalloc_wrapper.cpp to satisfy the bionic MallocDispatch table.
 struct mallinfo mi_mallinfo();
-size_t mi_malloc_usable_size(const void*);
 int mi_malloc_iterate(uintptr_t base, size_t size,
                       void (*callback)(uintptr_t base, size_t size, void* arg), void* arg);
 void mi_malloc_disable();

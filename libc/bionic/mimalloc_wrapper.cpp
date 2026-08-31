@@ -72,11 +72,6 @@ void* mi_aligned_alloc_wrapper(size_t alignment, size_t size) {
 }
 
 // ---------------------------------------------------------------------------
-// usable size: mimalloc spells it mi_usable_size().
-// ---------------------------------------------------------------------------
-size_t mi_malloc_usable_size(const void* p) {
-  return mi_usable_size(p);
-}
 
 // ---------------------------------------------------------------------------
 // mallinfo: mimalloc has no malloc(3)-style breakdown. Report committed bytes
