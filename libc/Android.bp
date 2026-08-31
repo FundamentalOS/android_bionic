@@ -97,6 +97,12 @@ cc_defaults {
         malloc_low_memory: {
             cflags: ["-UUSE_SCUDO"],
         },
+        malloc_use_mimalloc: {
+            cflags: [
+                "-UUSE_SCUDO",
+                "-DUSE_MIMALLOC",
+            ],
+        },
     },
 
     lto: {
@@ -189,6 +195,19 @@ cc_defaults {
                 "libscudo",
             ],
         },
+        malloc_use_mimalloc: {
+            cflags: [
+                "-UUSE_SCUDO",
+                "-DUSE_MIMALLOC",
+            ],
+            whole_static_libs: [
+                "libmimalloc",
+                "libc_mimalloc_wrapper",
+            ],
+            exclude_static_libs: [
+                "libscudo",
+            ],
+        },
     },
 }
 
@@ -203,6 +222,19 @@ cc_library_static {
     // Used to pull in the jemalloc include directory so that if the
     // library is removed, the include directory is also removed.
     static_libs: ["libjemalloc5"],
+}
+
+// Functions not implemented by mimalloc directly, or that need to
+// be modified for Android.
+cc_library_static {
+    name: "libc_mimalloc_wrapper",
+    defaults: ["libc_defaults"],
+    srcs: ["bionic/mimalloc_wrapper.cpp"],
+    cflags: ["-fvisibility=hidden"],
+
+    // Pull in the mimalloc include directory so the wrapper can see
+    // <mimalloc.h>, and so removing the library also removes the includes.
+    static_libs: ["libmimalloc"],
 }
 
 // ========================================================
