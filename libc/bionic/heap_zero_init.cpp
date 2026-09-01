@@ -30,9 +30,16 @@
 
 extern "C" void scudo_malloc_set_zero_contents(int zero_contents);
 
+#if defined(USE_MIMALLOC)
+extern "C" void mi_bionic_set_zero_init(bool enable);
+#endif
+
 bool SetHeapZeroInitialize(bool zero_init __attribute__((__unused__))) {
-#ifdef USE_SCUDO
+#if defined(USE_SCUDO)
   scudo_malloc_set_zero_contents(zero_init);
+  return true;
+#elif defined(USE_MIMALLOC)
+  mi_bionic_set_zero_init(zero_init);
   return true;
 #endif
   return false;
