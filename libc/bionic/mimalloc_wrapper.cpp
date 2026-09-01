@@ -209,3 +209,7 @@ int mi_malloc_info(int options, FILE* fp) {
   MallocXmlElem(fd, "peak-rss").Contents("%zu", peak_rss);
   return 0;
 }
+
+// v2.5.0 moved mi_malloc_usable_size into alloc-override.c (MI_MALLOC_OVERRIDE-gated,
+// which we do not enable). Provide it here mapping to the always-compiled mi_usable_size.
+extern "C" size_t mi_malloc_usable_size(const void* p) mi_attr_noexcept { return mi_usable_size(p); }
