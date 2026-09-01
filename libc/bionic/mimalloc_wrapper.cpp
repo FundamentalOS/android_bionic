@@ -213,3 +213,22 @@ int mi_malloc_info(int options, FILE* fp) {
 // v2.5.0 moved mi_malloc_usable_size into alloc-override.c (MI_MALLOC_OVERRIDE-gated,
 // which we do not enable). Provide it here mapping to the always-compiled mi_usable_size.
 extern "C" size_t mi_malloc_usable_size(const void* p) mi_attr_noexcept { return mi_usable_size(p); }
+
+// ---------------------------------------------------------------------------
+// Allocator tuning applied once at libc startup.
+//
+// mimalloc's default purge mode is *reset* (MADV_FREE): freed pages are handed
+// back to the kernel lazily, but mimalloc keeps counting them as committed. Its
+// committed-bytes counter therefore climbs to the lifetime high-water mark and
+// never falls, even though RSS is far lower. bionic surfaces that counter as
+// mallinfo().uordblks and malloc_info()'s current-commit, so `dumpsys meminfo`
+// reports a Native Heap "Alloc" of many GB for long-lived processes (e.g.
+// system_server) that is pure phantom -- the memory is not actually in use.
+//
+// Switch purge to *decommit* (MADV_DONTNEED): freed pages are returned to the
+// OS and dropped from the committed counter, so the reported figure tracks real
+// usage. Costs a minor fault on reuse; the hot alloc/free path is unaffected.
+// ---------------------------------------------------------------------------
+__attribute__((constructor)) static void mi_bionic_tune() {
+  mi_option_set(mi_option_purge_decommits, 1);
+}
