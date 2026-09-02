@@ -26,6 +26,7 @@
 //   mi_heap_get_default, mi_heap_visit_blocks, mi_block_visit_fun.
 
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <malloc.h>
 #include <stdbit.h>
@@ -78,6 +79,31 @@ void* mi_aligned_alloc_wrapper(size_t alignment, size_t size) {
 // resident footprint as a coarse approximation of the in-use total. Callers
 // that need precise per-bin data are not served by mimalloc; best effort.
 // ---------------------------------------------------------------------------
+// mimalloc's mi_process_info() does NOT populate current_rss on Linux: its
+// _mi_prim_process_info (mimalloc/src/prim/unix/prim.c) only fills peak_rss
+// (ru_maxrss) and leaves current_rss at the stats.c fallback, which is set equal
+// to current_commit. Under our MADV_FREE purge that committed high-water mark is
+// a phantom multi-GB value, so mi_process_info's current_rss is unusable as a
+// footprint. Read the real resident set size straight from the kernel instead.
+static size_t mi_current_rss_bytes() {
+  int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return 0;
+  char buf[128];
+  ssize_t n = TEMP_FAILURE_RETRY(read(fd, buf, sizeof(buf) - 1));
+  close(fd);
+  if (n <= 0) return 0;
+  buf[n] = '\0';
+  // /proc/self/statm fields (in pages): size resident shared text lib data dt.
+  // Skip field 1 (size), then parse field 2 (resident).
+  const char* c = buf;
+  while (*c == ' ') c++;
+  while (*c >= '0' && *c <= '9') c++;   // skip size
+  while (*c == ' ') c++;
+  size_t rss_pages = 0;
+  while (*c >= '0' && *c <= '9') { rss_pages = rss_pages * 10 + (size_t)(*c - '0'); c++; }
+  return rss_pages * (size_t)getpagesize();
+}
+
 struct mallinfo mi_mallinfo() {
   struct mallinfo info;
   memset(&info, 0, sizeof(info));
@@ -88,14 +114,17 @@ struct mallinfo mi_mallinfo() {
                   &current_commit, &peak_commit, &page_faults);
 
   // bionic's struct mallinfo members are size_t.
-  // Purge stays in reset mode (MADV_FREE) for UI smoothness; under it the
-  // committed-bytes counter only climbs to the lifetime high-water mark and
-  // would surface as a phantom multi-GB Native Heap "Alloc" in dumpsys.
-  // Report the kernel-backed resident footprint instead -- never exceeds
-  // real usage. (Slightly high: whole-process RSS incl. dalvik/code/stack.)
-  info.arena = current_rss;        // resident footprint (best cheap proxy)
-  info.uordblks = current_rss;     // shown as Native Heap "Alloc" by dumpsys
-  info.hblkhd = peak_rss;          // peak resident
+  // Purge stays in reset mode (MADV_FREE) for UI smoothness; under it mimalloc's
+  // committed-bytes counter only climbs to the lifetime high-water mark and would
+  // surface as a phantom multi-GB Native Heap "Alloc" in dumpsys. Report the real
+  // kernel-backed resident footprint (from /proc/self/statm) instead -- it never
+  // exceeds actual usage. current_rss from mi_process_info is bogus here, so use
+  // it only as a fallback when /proc is unreadable.
+  size_t rss = mi_current_rss_bytes();
+  if (rss == 0) rss = current_rss;
+  info.arena = rss;            // resident footprint (best cheap proxy)
+  info.uordblks = rss;         // shown as Native Heap "Alloc" by dumpsys
+  info.hblkhd = peak_rss;      // peak resident (ru_maxrss; this one is real)
   return info;
 }
 
@@ -210,7 +239,7 @@ int mi_malloc_info(int options, FILE* fp) {
 
   MallocXmlElem(fd, "current-commit").Contents("%zu", current_commit);
   MallocXmlElem(fd, "peak-commit").Contents("%zu", peak_commit);
-  MallocXmlElem(fd, "current-rss").Contents("%zu", current_rss);
+  MallocXmlElem(fd, "current-rss").Contents("%zu", mi_current_rss_bytes());
   MallocXmlElem(fd, "peak-rss").Contents("%zu", peak_rss);
   return 0;
 }
